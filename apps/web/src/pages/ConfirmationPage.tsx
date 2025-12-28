@@ -1,29 +1,68 @@
 import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ordersApi } from '../api/checkout';
+import { ApiException } from '../api/client';
 import { CheckoutSteps } from '../components/CheckoutSteps';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { useCheckout } from '../context/CheckoutContext';
 import { formatCurrency } from '../utils/format';
 
 export function ConfirmationPage() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
+  const { clearCheckout } = useCheckout();
 
   const { data: order, isLoading, error } = useQuery({
     queryKey: ['order', orderId],
     queryFn: () => ordersApi.getOrder(orderId!),
     enabled: !!orderId,
+    retry: (failureCount, err) => {
+      // Orders are created asynchronously; a 404 right after checkout can be normal.
+      if (err instanceof ApiException && err.error.status === 404) {
+        return failureCount < 10;
+      }
+      return false;
+    },
+    retryDelay: 500,
+    refetchInterval: (query) => {
+      const data = query.state.data as typeof order | undefined;
+      if (!data) return 1000;
+
+      const terminal = ['CONFIRMED', 'PAYMENT_FAILED', 'FAILED', 'CANCELLED'].includes(
+        data.status,
+      );
+
+      return terminal ? false : 1500;
+    },
   });
 
-  if (isLoading) {
+  useEffect(() => {
+    if (order?.status === 'CONFIRMED') {
+      // Only clear checkout state once payment is actually confirmed.
+      clearCheckout();
+    }
+  }, [order?.status, clearCheckout]);
+
+  const notReadyYet =
+    error instanceof ApiException && error.error.status === 404;
+
+  if (isLoading || notReadyYet) {
     return (
       <div className="container mx-auto px-4 py-10 max-w-4xl space-y-6">
         <CheckoutSteps current="confirmation" />
         <Card>
           <CardContent className="pt-6">
-            <p>Loading order details...</p>
+            <div className="flex items-center gap-3">
+              <div className="h-5 w-5 rounded-full border-2 border-muted-foreground/30 border-t-primary animate-spin" />
+              <p>
+                {notReadyYet
+                  ? 'Creating your order...'
+                  : 'Loading order details...'}
+              </p>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -46,39 +85,88 @@ export function ConfirmationPage() {
     );
   }
 
+  const isPending = ['PENDING', 'PENDING_PAYMENT', 'PROCESSING'].includes(order.status);
+  const isFailed = ['PAYMENT_FAILED', 'FAILED', 'CANCELLED'].includes(order.status);
+
   return (
     <div className="container mx-auto px-4 py-10 max-w-4xl space-y-6">
       <CheckoutSteps current="confirmation" />
 
       <Card className="text-center">
         <CardContent className="pt-10 pb-8">
-          <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-green-500 to-green-600 rounded-full flex items-center justify-center shadow-xl animate-in zoom-in duration-500">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={3}
-              stroke="white"
-              className="w-12 h-12"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4.5 12.75l6 6 9-13.5"
-              />
-            </svg>
-          </div>
+          {order.status === 'CONFIRMED' && (
+            <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-green-500 to-green-600 rounded-full flex items-center justify-center shadow-xl animate-in zoom-in duration-500">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={3}
+                stroke="white"
+                className="w-12 h-12"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M4.5 12.75l6 6 9-13.5"
+                />
+              </svg>
+            </div>
+          )}
 
-          <h2 className="text-3xl font-extrabold mb-2 bg-gradient-to-r from-green-600 to-green-700 bg-clip-text text-transparent">
-            Order Confirmed!
+          {isPending && (
+            <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center shadow-xl">
+              <div className="h-10 w-10 rounded-full border-4 border-white/30 border-t-white animate-spin" />
+            </div>
+          )}
+
+          {isFailed && (
+            <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-red-500 to-red-600 rounded-full flex items-center justify-center shadow-xl">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={3}
+                stroke="white"
+                className="w-12 h-12"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </div>
+          )}
+
+          <h2 className="text-3xl font-extrabold mb-2">
+            {order.status === 'CONFIRMED'
+              ? 'Order Confirmed!'
+              : isPending
+                ? 'Processing Payment…'
+                : 'Payment Failed'}
           </h2>
+
           <p className="text-muted-foreground mb-6 text-lg">
-            Thank you for your purchase. We'll send you a confirmation email shortly.
+            {order.status === 'CONFIRMED'
+              ? "Thank you for your purchase. We'll send you a confirmation email shortly."
+              : isPending
+                ? 'Your order was received. We’re waiting on the payment result.'
+                : order.payment?.error ||
+                  'Your payment could not be processed. Please try another card.'}
           </p>
 
           <div className="inline-block bg-muted px-6 py-3 rounded-lg">
             Order ID: <strong className="text-primary">{order.orderId}</strong>
           </div>
+
+          {isFailed && (
+            <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
+              <Button onClick={() => navigate('/payment')}>Try Another Card</Button>
+              <Button variant="outline" onClick={() => navigate('/cart')}>
+                Return to Cart
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

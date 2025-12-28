@@ -19,7 +19,7 @@ interface FormErrors {
 
 export function PaymentPage() {
   const navigate = useNavigate();
-  const { shippingAddress, clearCheckout } = useCheckout();
+  const { shippingAddress } = useCheckout();
 
   // Generate idempotency key once on mount and persist across retries
   const idempotencyKeyRef = useRef<string>(generateIdempotencyKey());
@@ -74,7 +74,6 @@ export function PaymentPage() {
       );
     },
     onSuccess: (data) => {
-      clearCheckout();
       setGeneralError(null);
       navigate(`/confirmation/${data.orderId}`);
     },

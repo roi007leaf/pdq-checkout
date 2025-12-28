@@ -6,6 +6,12 @@ export interface OrderOutput {
   orderId: string;
   status: string;
   currency: string;
+  payment?: {
+    id?: string | null;
+    transactionId?: string | null;
+    error?: string;
+    errorCode?: string;
+  };
   items: Array<{
     sku: string;
     name: string;
@@ -68,6 +74,17 @@ export class GetOrderUseCase extends UseCase<string, OrderOutput> {
         orderId: orderData.id,
         status: orderData.status,
         currency: orderData.currency,
+        payment: orderData.payment
+          ? {
+              id: orderData.payment.id ?? orderData.paymentId ?? null,
+              transactionId:
+                orderData.payment.transactionId ??
+                orderData.paymentTransactionId ??
+                null,
+              error: orderData.payment.error,
+              errorCode: orderData.payment.errorCode,
+            }
+          : undefined,
         items:
           orderData.items?.map((item: any) => ({
             sku: item.productId || item.sku,

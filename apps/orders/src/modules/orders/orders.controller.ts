@@ -13,6 +13,10 @@ export class OrdersController {
       throw new NotFoundException(`Order ${id} not found`);
     }
 
+    const metadata = (order.metadata || {}) as Record<string, unknown>;
+    const paymentError = metadata["paymentError"] as string | undefined;
+    const paymentErrorCode = metadata["paymentErrorCode"] as string | undefined;
+
     return {
       id: order.id,
       status: order.status,
@@ -21,6 +25,13 @@ export class OrdersController {
       tax: order.tax,
       grandTotal: order.grandTotal,
       paymentId: order.paymentId,
+      paymentTransactionId: order.paymentTransactionId,
+      payment: {
+        id: order.paymentId,
+        transactionId: order.paymentTransactionId,
+        error: paymentError,
+        errorCode: paymentErrorCode,
+      },
       items: order.items?.map((item) => ({
         productId: item.productId,
         name: item.name,

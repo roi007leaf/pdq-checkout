@@ -57,6 +57,12 @@ export interface Order {
   orderId: string;
   status: string;
   currency: string;
+  payment?: {
+    id?: string | null;
+    transactionId?: string | null;
+    error?: string;
+    errorCode?: string;
+  };
   items: CartItem[];
   totals: {
     subtotal: number;
