@@ -10,22 +10,27 @@ A complete e-commerce checkout flow implementation with NestJS backend and React
 - **Order Confirmation**: Unique order ID with full order details
 - **Idempotency**: Prevents duplicate orders on payment retries
 - **Transactional Outbox**: Reliable event publishing to Kafka/Redpanda
+- **Kafka Consumer (Inbox pattern)**: Demonstrates safe, idempotent consumption of `OrderCreated`
+- **Graceful dependency failures**: Database connectivity issues map to HTTP 503 with `Retry-After`
 
 ## Tech Stack
 
 ### Backend
+
 - **NestJS** - Node.js framework with TypeScript
 - **TypeORM** - Database ORM with PostgreSQL
 - **KafkaJS** - Kafka client for event publishing
 - **Clean Architecture** - Use-case based organization
 
 ### Frontend
+
 - **React 18** - UI library
 - **React Query** - Server state management
 - **React Router** - Client-side routing
 - **Vite** - Build tool and dev server
 
 ### Infrastructure
+
 - **PostgreSQL 16** - Primary database
 - **Redpanda** - Kafka-compatible event streaming
 - **Docker Compose** - Local development environment
@@ -87,6 +92,7 @@ npm run docker:logs
 ```
 
 Services will be available at:
+
 - PostgreSQL: `localhost:5432`
 - Redpanda (Kafka): `localhost:19092`
 - Redpanda Console: `http://localhost:8080`
@@ -117,30 +123,36 @@ npm run dev:web
 
 ### 5. Access the application
 
-- Frontend: http://localhost:5173
-- API: http://localhost:3000/api
-- Health check: http://localhost:3000/api/health
+- Frontend: <http://localhost:5173>
+- API: <http://localhost:3000/api>
+- Health check: <http://localhost:3000/api/health>
 
 ## API Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/health` | Health check |
-| GET | `/api/cart` | Get cart contents |
-| POST | `/api/checkout/shipping` | Validate shipping address |
-| POST | `/api/checkout/payment` | Process payment (requires `Idempotency-Key` header) |
-| GET | `/api/orders/:id` | Get order details |
+| Method | Endpoint                 | Description                                         |
+| ------ | ------------------------ | --------------------------------------------------- |
+| GET    | `/api/health`            | Health check                                        |
+| GET    | `/api/cart`              | Get cart contents                                   |
+| POST   | `/api/checkout/shipping` | Validate shipping address                           |
+| POST   | `/api/checkout/payment`  | Process payment (requires `Idempotency-Key` header) |
+| GET    | `/api/orders/:id`        | Get order details                                   |
+
+### Error responses
+
+Errors are returned as `application/problem+json` with a stable `code` and a `traceId`.
+
+- Dependency outages (e.g., Postgres unavailable) return **503** with `code=DEPENDENCY_UNAVAILABLE` and a `Retry-After` header.
 
 ## Testing Payment
 
 The mock payment gateway simulates different scenarios based on card number:
 
-| Card Number Ending | Result |
-|--------------------|--------|
-| Any other | ✅ Success |
-| `0000` | ❌ Declined (insufficient funds) |
-| `1111` | ❌ Declined (invalid card) |
-| `9999` | ❌ Gateway error |
+| Card Number Ending | Result                           |
+| ------------------ | -------------------------------- |
+| Any other          | ✅ Success                       |
+| `0000`             | ❌ Declined (insufficient funds) |
+| `1111`             | ❌ Declined (invalid card)       |
+| `9999`             | ❌ Gateway error                 |
 
 Example test card: `4242424242424242`
 
@@ -188,9 +200,20 @@ Events are published reliably using the transactional outbox pattern:
 
 **Why**: Guarantees that if an order is created, the event will eventually be published. No "dual write" problem.
 
+### Kafka Consumption: Inbox / Dedupe
+
+To demonstrate safe consumption (at-least-once delivery), the API also runs a small consumer that listens to `OrderCreated` events.
+
+- Topic: `order.events`
+- Dedupe: `consumer_inbox` table with a unique constraint on `(consumerGroup, topic, partition, offset)`
+- Side-effect example: `fulfillment_tasks` table (unique per `orderId`)
+
+**Why**: In production, consumers will see duplicates. The inbox pattern makes processing idempotent and failure-safe.
+
 ### React Query for Server State
 
 All API calls use React Query for:
+
 - Automatic caching and deduplication
 - Loading and error states
 - Optimistic updates (where applicable)

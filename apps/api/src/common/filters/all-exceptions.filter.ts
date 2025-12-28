@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { getCorrelationId } from '../middleware/correlation-id.middleware';
+import { QueryFailedError, TypeORMError } from 'typeorm';
 
 export interface ProblemDetails {
   type?: string;
@@ -32,6 +33,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let title = 'Internal Server Error';
     let detail: string | undefined;
     let errors: Array<{ field: string; message: string }> | undefined;
+    let retryAfterSeconds: number | undefined;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -60,8 +62,20 @@ export class AllExceptionsFilter implements ExceptionFilter {
         code = this.getCodeFromStatus(status);
       }
     } else if (exception instanceof Error) {
-      detail = exception.message;
-      console.error('Unhandled exception:', exception);
+      // Map dependency failures (e.g., Postgres down) to 503 so clients can react appropriately.
+      if (this.isDependencyUnavailableError(exception)) {
+        status = HttpStatus.SERVICE_UNAVAILABLE;
+        code = 'DEPENDENCY_UNAVAILABLE';
+        title = 'Service temporarily unavailable';
+        detail = 'A required dependency (database) is unavailable. Please try again shortly.';
+        retryAfterSeconds = 5;
+
+        // Keep logs lightweight; don’t dump full stack for expected outages.
+        console.warn('Dependency unavailable:', exception.message);
+      } else {
+        detail = exception.message;
+        console.error('Unhandled exception:', exception);
+      }
     }
 
     const problemDetails: ProblemDetails = {
@@ -75,10 +89,46 @@ export class AllExceptionsFilter implements ExceptionFilter {
       ...(errors && { errors }),
     };
 
-    response
+    const res = response
       .status(status)
-      .header('Content-Type', 'application/problem+json')
-      .json(problemDetails);
+      .header('Content-Type', 'application/problem+json');
+
+    if (retryAfterSeconds !== undefined) {
+      res.header('Retry-After', String(retryAfterSeconds));
+    }
+
+    res.json(problemDetails);
+  }
+
+  private isDependencyUnavailableError(exception: Error): boolean {
+    // TypeORM/PG connection failures commonly surface as TypeORMError or QueryFailedError
+    // with underlying driver codes/messages.
+    if (exception instanceof TypeORMError || exception instanceof QueryFailedError) {
+      const msg = exception.message.toLowerCase();
+      return (
+        msg.includes('econnrefused') ||
+        msg.includes('connection terminated') ||
+        msg.includes('terminating connection') ||
+        msg.includes('timeout') ||
+        msg.includes('could not connect') ||
+        msg.includes('the database system is starting up') ||
+        msg.includes('remaining connection slots')
+      );
+    }
+
+    // Some driver/network errors bubble up as plain Error with a code.
+    const anyErr = exception as unknown as { code?: string };
+    if (anyErr.code) {
+      return ['ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNRESET'].includes(anyErr.code);
+    }
+
+    const msg = exception.message.toLowerCase();
+    return (
+      msg.includes('econnrefused') ||
+      msg.includes('connect') && msg.includes('refused') ||
+      msg.includes('database') && msg.includes('unavailable') ||
+      msg.includes('could not connect')
+    );
   }
 
   private getCodeFromStatus(status: number): string {
@@ -97,6 +147,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
         return 'UNPROCESSABLE_ENTITY';
       case 429:
         return 'RATE_LIMITED';
+      case 503:
+        return 'DEPENDENCY_UNAVAILABLE';
       default:
         return 'INTERNAL_ERROR';
     }
