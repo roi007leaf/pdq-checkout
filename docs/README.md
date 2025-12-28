@@ -219,10 +219,14 @@ Because payment is async, the UI **cannot** treat a successful `POST /api/checko
 Instead the web app navigates to `/confirmation/:orderId` and:
 
 - Polls `GET /api/orders/:id` until the order reaches a terminal state.
-- Shows one of these states:
-  - `PENDING_PAYMENT` / `PROCESSING` → **Processing Payment…**
-  - `CONFIRMED` → **Order Confirmed** (and only then the checkout state is cleared)
-  - `PAYMENT_FAILED` → **Payment Failed** + error message + “Try Another Card”
+
+Status → UI mapping:
+
+| Order status                    | UI behavior                                                   |
+| ------------------------------- | ------------------------------------------------------------- |
+| `PENDING_PAYMENT`, `PROCESSING` | Show **Processing Payment…**                                  |
+| `CONFIRMED`                     | Show **Order Confirmed** (and only then clear checkout state) |
+| `PAYMENT_FAILED`                | Show **Payment Failed** + error message + “Try Another Card”  |
 
 Note: right after kickoff, the order may not exist yet in the Orders service; a brief **404** can be normal while the async flow catches up.
 

@@ -608,14 +608,14 @@ const sanitizedPaymentDetails: PaymentDetails = {
 ### Testing Failed Payments
 
 1. **Submit payment** with card `5555555555551111`
-2. **Watch logs** - Payment service should show:
+1. **Watch logs** - Payment service should show:
 
 ```text
  [PaymentService] Processing payment: { last4: '1111', amount: 13994 }
  ✅ Payment xxx processed for order xxx: PaymentFailed
 ```
 
-3. **Check databases**:
+1. **Check databases**:
    - `pdq_payment.payment_transactions` → status = `FAILED`, error_message = `Invalid card`
    - `pdq_orders.orders` → status = `PAYMENT_FAILED`
 
