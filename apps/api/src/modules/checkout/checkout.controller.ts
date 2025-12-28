@@ -65,7 +65,7 @@ export class CheckoutController {
     // If already completed, return cached response
     if (idempotencyResult.status === 'COMPLETED' && idempotencyResult.response) {
       return {
-        ...(idempotencyResult.response as PaymentResponse),
+        ...(idempotencyResult.response as unknown as PaymentResponse),
         replayed: true,
       };
     }

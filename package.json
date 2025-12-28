@@ -17,6 +17,7 @@
     "install:all": "npm install && cd apps/api && npm install && cd ../web && npm install"
   },
   "devDependencies": {
+    "@types/node": "^25.0.3",
     "concurrently": "^8.2.2"
   },
   "engines": {

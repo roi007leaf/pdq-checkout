@@ -18,6 +18,7 @@ export interface PaymentResponse {
   currency: string;
   createdAt: Date;
   replayed?: boolean;
+  [key: string]: unknown;
 }
 
 @Injectable()

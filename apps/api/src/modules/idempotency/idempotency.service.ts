@@ -11,7 +11,7 @@ import { IdempotencyConflictException } from '../../common/exceptions/domain.exc
 export interface IdempotencyCheckResult {
   status: IdempotencyStatus;
   isNew: boolean;
-  response?: Record<string, unknown>;
+  response?: unknown;
 }
 
 const IDEMPOTENCY_TTL_HOURS = 24;
@@ -103,27 +103,25 @@ export class IdempotencyService {
     key: string,
     scope: string,
     responseCode: number,
-    responseBody: Record<string, unknown>,
+    responseBody: unknown,
   ): Promise<void> {
-    await this.idempotencyRepository.update(
-      { key, scope },
-      {
-        status: IdempotencyStatus.COMPLETED,
-        responseCode,
-        responseBody,
-        lockedAt: null,
-      },
-    );
+    const record = await this.idempotencyRepository.findOne({ where: { key, scope } });
+    if (record) {
+      record.status = IdempotencyStatus.COMPLETED;
+      record.responseCode = responseCode;
+      record.responseBody = responseBody as Record<string, unknown>;
+      record.lockedAt = null;
+      await this.idempotencyRepository.save(record);
+    }
   }
 
   async markFailed(key: string, scope: string): Promise<void> {
-    await this.idempotencyRepository.update(
-      { key, scope },
-      {
-        status: IdempotencyStatus.FAILED,
-        lockedAt: null,
-      },
-    );
+    const record = await this.idempotencyRepository.findOne({ where: { key, scope } });
+    if (record) {
+      record.status = IdempotencyStatus.FAILED;
+      record.lockedAt = null;
+      await this.idempotencyRepository.save(record);
+    }
   }
 
   private hashPayload(payload: unknown): string {
