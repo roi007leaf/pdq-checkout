@@ -1,10 +1,10 @@
-import { Injectable } from '@nestjs/common';
-import { EntityManager } from 'typeorm';
-import { ConsumerInboxEntity } from './infrastructure/entities/consumer-inbox.entity';
+import { Injectable } from "@nestjs/common";
+import { EntityManager } from "typeorm";
+import { ConsumerInboxEntity } from "./infrastructure/entities/consumer-inbox.entity";
 import {
   FulfillmentStatus,
   FulfillmentTaskEntity,
-} from './infrastructure/entities/fulfillment-task.entity';
+} from "./infrastructure/entities/fulfillment-task.entity";
 
 @Injectable()
 export class FulfillmentService {
@@ -20,7 +20,7 @@ export class FulfillmentService {
       offset: string;
       orderId: string;
       payload: Record<string, unknown>;
-    },
+    }
   ): Promise<{ processed: boolean }> {
     // Insert inbox first (dedupe). If unique violation occurs, skip.
     const inbox = manager.create(ConsumerInboxEntity, {
@@ -33,7 +33,7 @@ export class FulfillmentService {
     try {
       await manager.save(inbox);
     } catch (e: unknown) {
-      if (e instanceof Error && e.message.toLowerCase().includes('duplicate')) {
+      if (e instanceof Error && e.message.toLowerCase().includes("duplicate")) {
         return { processed: false };
       }
       throw e;
@@ -50,7 +50,7 @@ export class FulfillmentService {
       await manager.save(task);
     } catch (e: unknown) {
       // If task already exists, it is safe to ignore.
-      if (e instanceof Error && e.message.toLowerCase().includes('duplicate')) {
+      if (e instanceof Error && e.message.toLowerCase().includes("duplicate")) {
         return { processed: true };
       }
       throw e;

@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+const API_BASE = "/api";
 
 export interface ApiError {
   type?: string;
@@ -13,7 +13,7 @@ export interface ApiError {
 export class ApiException extends Error {
   constructor(public readonly error: ApiError) {
     super(error.detail || error.title);
-    this.name = 'ApiException';
+    this.name = "ApiException";
   }
 }
 
@@ -23,16 +23,19 @@ function generateIdempotencyKey(): string {
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const contentType = response.headers.get('content-type');
-    if (contentType?.includes('application/problem+json') || contentType?.includes('application/json')) {
+    const contentType = response.headers.get("content-type");
+    if (
+      contentType?.includes("application/problem+json") ||
+      contentType?.includes("application/json")
+    ) {
       const error = await response.json();
       throw new ApiException(error);
     }
     throw new ApiException({
-      title: 'Request Failed',
+      title: "Request Failed",
       status: response.status,
-      code: 'REQUEST_FAILED',
-      traceId: 'unknown',
+      code: "REQUEST_FAILED",
+      traceId: "unknown",
       detail: `HTTP ${response.status}: ${response.statusText}`,
     });
   }
@@ -42,7 +45,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
 export async function get<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
   });
   return handleResponse<T>(response);
@@ -51,18 +54,18 @@ export async function get<T>(path: string): Promise<T> {
 export async function post<T>(
   path: string,
   body: unknown,
-  options?: { idempotencyKey?: string },
+  options?: { idempotencyKey?: string }
 ): Promise<T> {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   };
 
   if (options?.idempotencyKey) {
-    headers['Idempotency-Key'] = options.idempotencyKey;
+    headers["Idempotency-Key"] = options.idempotencyKey;
   }
 
   const response = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
+    method: "POST",
     headers,
     body: JSON.stringify(body),
   });

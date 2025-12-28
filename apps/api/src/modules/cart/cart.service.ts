@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable } from "@nestjs/common";
 
 export interface CartItem {
   sku: string;
@@ -19,22 +19,22 @@ export interface Cart {
 // Mock cart data - in production this would come from a cart service/database
 const MOCK_CART_ITEMS: CartItem[] = [
   {
-    sku: 'WIDGET-001',
-    name: 'Premium Widget',
+    sku: "WIDGET-001",
+    name: "Premium Widget",
     unitPrice: 2999, // $29.99
     quantity: 2,
     lineTotal: 5998,
   },
   {
-    sku: 'GADGET-002',
-    name: 'Super Gadget',
+    sku: "GADGET-002",
+    name: "Super Gadget",
     unitPrice: 4999, // $49.99
     quantity: 1,
     lineTotal: 4999,
   },
   {
-    sku: 'CABLE-003',
-    name: 'USB-C Cable',
+    sku: "CABLE-003",
+    name: "USB-C Cable",
     unitPrice: 999, // $9.99
     quantity: 3,
     lineTotal: 2997,
@@ -51,7 +51,7 @@ export class CartService {
 
     return {
       items,
-      currency: 'USD',
+      currency: "USD",
       subtotal,
       tax,
       grandTotal,

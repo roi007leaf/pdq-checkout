@@ -1,4 +1,4 @@
-import { get, post, generateIdempotencyKey } from './client';
+import { generateIdempotencyKey, get, post } from "./client";
 
 // Types
 export interface CartItem {
@@ -70,15 +70,15 @@ export interface Order {
 
 // API functions
 export const cartApi = {
-  getCart: () => get<Cart>('/cart'),
+  getCart: () => get<Cart>("/cart"),
 };
 
 export const checkoutApi = {
   validateShipping: (address: ShippingAddress) =>
-    post<ValidatedShipping>('/checkout/shipping', address),
+    post<ValidatedShipping>("/checkout/shipping", address),
 
   processPayment: (request: ProcessPaymentRequest, idempotencyKey?: string) =>
-    post<PaymentResponse>('/checkout/payment', request, {
+    post<PaymentResponse>("/checkout/payment", request, {
       idempotencyKey: idempotencyKey || generateIdempotencyKey(),
     }),
 };

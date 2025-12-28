@@ -1,10 +1,10 @@
-import { Injectable } from '@nestjs/common';
-import { EntityManager } from 'typeorm';
+import { Injectable } from "@nestjs/common";
+import { EntityManager } from "typeorm";
+import { v4 as uuidv4 } from "uuid";
 import {
   OutboxEventEntity,
   OutboxStatus,
-} from './infrastructure/entities/outbox-event.entity';
-import { v4 as uuidv4 } from 'uuid';
+} from "./infrastructure/entities/outbox-event.entity";
 
 @Injectable()
 export class OutboxService {
@@ -14,7 +14,7 @@ export class OutboxService {
     aggregateId: string,
     eventType: string,
     payload: Record<string, unknown>,
-    headers?: Record<string, unknown>,
+    headers?: Record<string, unknown>
   ): Promise<OutboxEventEntity> {
     const event = manager.create(OutboxEventEntity, {
       id: uuidv4(),

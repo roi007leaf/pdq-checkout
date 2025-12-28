@@ -1,15 +1,15 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThanOrEqual } from 'typeorm';
-import { Interval } from '@nestjs/schedule';
-import { ConfigService } from '@nestjs/config';
-import { Kafka, Producer, logLevel } from 'kafkajs';
+import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { Interval } from "@nestjs/schedule";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Kafka, Producer, logLevel } from "kafkajs";
+import { LessThanOrEqual, Repository } from "typeorm";
 import {
   OutboxEventEntity,
   OutboxStatus,
-} from './infrastructure/entities/outbox-event.entity';
+} from "./infrastructure/entities/outbox-event.entity";
 
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 30000; // Poll every 30 seconds instead of 5
 const BATCH_SIZE = 10;
 const MAX_RETRIES = 3;
 
@@ -21,7 +21,7 @@ export class OutboxPublisher implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectRepository(OutboxEventEntity)
     private readonly outboxRepository: Repository<OutboxEventEntity>,
-    private readonly configService: ConfigService,
+    private readonly configService: ConfigService
   ) {}
 
   async onModuleInit() {
@@ -35,12 +35,12 @@ export class OutboxPublisher implements OnModuleInit, OnModuleDestroy {
   }
 
   private async connectToKafka() {
-    const brokers = this.configService.get('KAFKA_BROKERS', 'localhost:19092');
+    const brokers = this.configService.get("KAFKA_BROKERS", "localhost:19092");
 
     try {
       const kafka = new Kafka({
-        clientId: 'pdq-api',
-        brokers: brokers.split(','),
+        clientId: "pdq-api",
+        brokers: brokers.split(","),
         logLevel: logLevel.WARN,
         retry: {
           initialRetryTime: 1000,
@@ -51,10 +51,15 @@ export class OutboxPublisher implements OnModuleInit, OnModuleDestroy {
       this.producer = kafka.producer();
       await this.producer.connect();
       this.isConnected = true;
-      console.log('✅ Connected to Redpanda/Kafka');
+      console.log("✅ Connected to Redpanda/Kafka");
     } catch (error) {
-      console.warn('⚠️ Could not connect to Redpanda/Kafka:', error instanceof Error ? error.message : error);
-      console.warn('⚠️ Outbox publishing disabled - events will remain in PENDING state');
+      console.warn(
+        "⚠️ Could not connect to Redpanda/Kafka:",
+        error instanceof Error ? error.message : error
+      );
+      console.warn(
+        "⚠️ Outbox publishing disabled - events will remain in PENDING state"
+      );
     }
   }
 
@@ -69,7 +74,7 @@ export class OutboxPublisher implements OnModuleInit, OnModuleDestroy {
         status: OutboxStatus.PENDING,
         availableAt: LessThanOrEqual(new Date()),
       },
-      order: { createdAt: 'ASC' },
+      order: { createdAt: "ASC" },
       take: BATCH_SIZE,
     });
 
@@ -85,12 +90,15 @@ export class OutboxPublisher implements OnModuleInit, OnModuleDestroy {
     const message = {
       key: event.aggregateId,
       value: JSON.stringify({
-        specVersion: '1.0',
+        specVersion: "1.0",
         eventId: event.id,
         eventType: event.eventType,
         eventVersion: event.eventVersion,
         occurredAt: event.createdAt.toISOString(),
-        producer: { service: 'pdq-api', env: process.env.NODE_ENV || 'development' },
+        producer: {
+          service: "pdq-api",
+          env: process.env.NODE_ENV || "development",
+        },
         correlationId: event.headers?.correlationId || null,
         data: event.payload,
       }),
@@ -114,9 +122,12 @@ export class OutboxPublisher implements OnModuleInit, OnModuleDestroy {
       console.log(`📤 Published event ${event.eventType} to ${topic}`);
     } catch (error) {
       const attempts = event.attempts + 1;
-      const status = attempts >= MAX_RETRIES ? OutboxStatus.FAILED : OutboxStatus.PENDING;
+      const status =
+        attempts >= MAX_RETRIES ? OutboxStatus.FAILED : OutboxStatus.PENDING;
       const availableAt = new Date();
-      availableAt.setSeconds(availableAt.getSeconds() + Math.pow(2, attempts) * 5);
+      availableAt.setSeconds(
+        availableAt.getSeconds() + Math.pow(2, attempts) * 5
+      );
 
       await this.outboxRepository.update(event.id, {
         status,

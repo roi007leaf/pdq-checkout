@@ -1,7 +1,7 @@
-import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { IdempotencyKeyEntity } from './infrastructure/entities/idempotency-key.entity';
-import { IdempotencyService } from './idempotency.service';
+import { Module } from "@nestjs/common";
+import { TypeOrmModule } from "@nestjs/typeorm";
+import { IdempotencyService } from "./idempotency.service";
+import { IdempotencyKeyEntity } from "./infrastructure/entities/idempotency-key.entity";
 
 @Module({
   imports: [TypeOrmModule.forFeature([IdempotencyKeyEntity])],

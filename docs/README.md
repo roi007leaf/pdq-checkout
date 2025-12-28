@@ -9,9 +9,26 @@ A complete e-commerce checkout flow implementation with NestJS backend and React
 - **Payment Processing**: Mock payment gateway with simulated success/failure scenarios
 - **Order Confirmation**: Unique order ID with full order details
 - **Idempotency**: Prevents duplicate orders on payment retries
-- **Transactional Outbox**: Reliable event publishing to Kafka/Redpanda
-- **Kafka Consumer (Inbox pattern)**: Demonstrates safe, idempotent consumption of `OrderCreated`
-- **Graceful dependency failures**: Database connectivity issues map to HTTP 503 with `Retry-After`
+- **Microservices Architecture**: 3 services (API Gateway, Orders, Payment) with DB-per-service
+- **Event-Driven**: Kafka/Redpanda for inter-service communication
+- **Transactional Outbox**: Reliable event publishing
+- **Consumer Inbox Pattern**: Idempotent message processing
+- **Graceful failures**: Database connectivity issues map to HTTP 503 with `Retry-After`
+
+## Microservices Architecture
+
+This implementation uses a **true microservices architecture** with:
+
+- **API Gateway** (`apps/api`): HTTP endpoints, idempotency, Kafka producer
+- **Orders Service** (`apps/orders`): Order lifecycle management with its own database
+- **Payment Service** (`apps/payment`): Payment processing with its own database
+
+Each service:
+
+- Has its own PostgreSQL database (DB-per-service pattern)
+- Communicates via Kafka events, not shared tables
+- Uses inbox/outbox patterns for reliable, exactly-once processing
+- Can be scaled independently
 
 ## Tech Stack
 
@@ -40,16 +57,22 @@ A complete e-commerce checkout flow implementation with NestJS backend and React
 ```
 PDQ/
 ├── apps/
-│   ├── api/                    # NestJS backend
+│   ├── api/                    # NestJS API Gateway
 │   │   └── src/
 │   │       ├── common/         # Shared utilities, filters, middleware
 │   │       └── modules/
 │   │           ├── cart/       # Cart service (mock data)
-│   │           ├── checkout/   # Shipping & payment use-cases
-│   │           ├── orders/     # Order persistence & retrieval
+│   │           ├── checkout/   # Shipping & payment endpoints
+│   │           ├── orders/     # Order proxy to Orders service
 │   │           ├── idempotency/# Idempotency key management
-│   │           ├── outbox/     # Transactional outbox publisher
+│   │           ├── messaging/  # Kafka producer
 │   │           └── health/     # Health check endpoint
+│   │
+│   ├── orders/                 # Orders microservice
+│   │   └── src/modules/orders/ # Order lifecycle, inbox, outbox
+│   │
+│   ├── payment/                # Payment microservice
+│   │   └── src/modules/payment/# Payment processing, inbox, outbox
 │   │
 │   └── web/                    # React frontend
 │       └── src/
@@ -93,9 +116,17 @@ npm run docker:logs
 
 Services will be available at:
 
-- PostgreSQL: `localhost:5432`
+- PostgreSQL (API): `localhost:5432`
+- PostgreSQL (Orders): `localhost:5435`
+- PostgreSQL (Payment): `localhost:5434`
 - Redpanda (Kafka): `localhost:19092`
 - Redpanda Console: `http://localhost:8080`
+
+Databases:
+
+- API DB: `localhost:5432` (db: `pdq_checkout`)
+- Orders DB: `localhost:5435` (db: `pdq_orders`)
+- Payment DB: `localhost:5434` (db: `pdq_payment`)
 
 ### 3. Create environment file
 
@@ -107,35 +138,86 @@ cp .env.example .env
 ### 4. Start development servers
 
 ```bash
-# Start both API and web servers
+# Start API Gateway and web UI
 npm run dev
+```
+
+Or run all microservices:
+
+```bash
+npm run dev:all
 ```
 
 Or start individually:
 
 ```bash
-# Terminal 1: Start API (port 3000)
+# Terminal 1: API Gateway (port 3000)
 npm run dev:api
 
-# Terminal 2: Start Web (port 5173)
+# Terminal 2: Orders Service (port 3003)
+npm run dev:orders
+
+# Terminal 3: Payment Service (port 3002)
+npm run dev:payment
+
+# Terminal 4: Web UI (port 5173)
 npm run dev:web
 ```
 
 ### 5. Access the application
 
 - Frontend: <http://localhost:5173>
-- API: <http://localhost:3000/api>
-- Health check: <http://localhost:3000/api/health>
+- API Gateway: <http://localhost:3000/api>
+- Orders Service: <http://localhost:3003/health>
+- Payment Service: <http://localhost:3002/health>
+- Redpanda Console: <http://localhost:8080>
 
 ## API Endpoints
 
-| Method | Endpoint                 | Description                                         |
-| ------ | ------------------------ | --------------------------------------------------- |
-| GET    | `/api/health`            | Health check                                        |
-| GET    | `/api/cart`              | Get cart contents                                   |
-| POST   | `/api/checkout/shipping` | Validate shipping address                           |
-| POST   | `/api/checkout/payment`  | Process payment (requires `Idempotency-Key` header) |
-| GET    | `/api/orders/:id`        | Get order details                                   |
+| Method | Endpoint                 | Description                                              |
+| ------ | ------------------------ | -------------------------------------------------------- |
+| GET    | `/api/health`            | Health check                                             |
+| GET    | `/api/cart`              | Get cart contents                                        |
+| POST   | `/api/checkout/shipping` | Validate shipping address                                |
+| POST   | `/api/checkout/payment`  | Start checkout async (requires `Idempotency-Key` header) |
+| GET    | `/api/orders/:id`        | Get order details                                        |
+
+## Checkout flow (what actually happens)
+
+The endpoint name `/api/checkout/payment` can be misleading: it **does not synchronously charge the card**.
+It **starts an async checkout** by publishing a Kafka event, then returns immediately with `PENDING_PAYMENT`.
+
+High-level sequence:
+
+1. **Client validates shipping**
+   - `POST /api/checkout/shipping`
+2. **Client starts checkout**
+   - `POST /api/checkout/payment`
+   - API generates an `orderId`, publishes `CheckoutRequested` to topic `checkout.requests`, returns:
+     - `status: PENDING_PAYMENT`
+     - `orderId`
+3. **Orders service creates the order**
+   - Consumes `checkout.requests`
+   - Persists order (in the **Orders DB**, `pdq_orders`) with status `PENDING_PAYMENT`
+   - Publishes `PaymentRequested` to topic `payment.requests`
+4. **Payment service processes payment**
+   - Consumes `payment.requests`
+   - Executes mock gateway rules (based on last 4 digits)
+   - Persists a row in **Payment DB** (`pdq_payment.payment_transactions`)
+   - Publishes `PaymentCompleted` or `PaymentFailed` to topic `payment.events`
+5. **Orders service updates order status**
+   - Consumes `payment.events`
+   - Updates order to `CONFIRMED` or `PAYMENT_FAILED`
+
+To observe completion in the UI, the client polls:
+
+- `GET /api/orders/:id` (API gateway proxies/queries the Orders service)
+
+Code pointers (current implementation):
+
+- API kickoff: `apps/api/src/modules/checkout/checkout.controller.ts` and `apps/api/src/modules/checkout/application/use-cases/async-checkout.usecase.ts`
+- Orders consumers + order creation: `apps/orders/src/modules/orders/**`
+- Payment consumer + persistence: `apps/payment/src/modules/payment/payment.service.ts`
 
 ### Error responses
 
@@ -194,21 +276,21 @@ Payment endpoint requires an `Idempotency-Key` header to prevent duplicate order
 Events are published reliably using the transactional outbox pattern:
 
 1. Order creation and outbox event are written in the same database transaction
-2. Background publisher polls the outbox table every 5 seconds
+2. Background publisher polls the outbox table on an interval (see `POLL_INTERVAL_MS` in each service)
 3. Events are published to Redpanda with at-least-once delivery
 4. Failed events are retried with exponential backoff
 
 **Why**: Guarantees that if an order is created, the event will eventually be published. No "dual write" problem.
 
-### Kafka Consumption: Inbox / Dedupe
+### Kafka Consumption: Inbox Pattern
 
-To demonstrate safe consumption (at-least-once delivery), the API also runs a small consumer that listens to `OrderCreated` events.
+Each microservice (Orders, Payment) uses the inbox pattern for safe consumption:
 
-- Topic: `order.events`
-- Dedupe: `consumer_inbox` table with a unique constraint on `(consumerGroup, topic, partition, offset)`
-- Side-effect example: `fulfillment_tasks` table (unique per `orderId`)
+- Topic subscriptions: Orders (`checkout.requests`, `payment.events`), Payment (`payment.requests`)
+- Dedupe: `consumer_inbox` table with unique constraint on `(consumerGroup, topic, partition, offset)`
+- Transaction boundary: inbox record + business logic in same DB transaction
 
-**Why**: In production, consumers will see duplicates. The inbox pattern makes processing idempotent and failure-safe.
+**Why**: In Kafka's at-least-once delivery, consumers will see duplicates. The inbox pattern makes processing idempotent and failure-safe.
 
 ### React Query for Server State
 

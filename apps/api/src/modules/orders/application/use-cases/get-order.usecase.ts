@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
-import { OrderRepository } from '../../infrastructure/repositories/order.repository';
-import { NotFoundException } from '../../../../common/exceptions/domain.exceptions';
+import { Injectable, NotFoundException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { UseCase } from "../../../../common/application/use-case.base";
 
 export interface OrderOutput {
   orderId: string;
@@ -30,43 +30,83 @@ export interface OrderOutput {
   updatedAt: string;
 }
 
+/**
+ * Gateway use case - proxies order lookups to the Orders microservice.
+ * In async mode, orders live in the Orders service DB, not the API DB.
+ */
 @Injectable()
-export class GetOrderUseCase {
-  constructor(private readonly orderRepository: OrderRepository) {}
+export class GetOrderUseCase extends UseCase<string, OrderOutput> {
+  private readonly ordersServiceUrl: string;
 
-  async execute(orderId: string): Promise<OrderOutput> {
-    const order = await this.orderRepository.findById(orderId);
+  constructor(private readonly configService: ConfigService) {
+    super(GetOrderUseCase.name);
+    const host = this.configService.get("ORDERS_SERVICE_HOST", "localhost");
+    const port = this.configService.get("ORDERS_SERVICE_PORT", "3003");
+    this.ordersServiceUrl = `http://${host}:${port}`;
+  }
 
-    if (!order) {
-      throw new NotFoundException('Order', orderId);
+  protected async executeImpl(orderId: string): Promise<OrderOutput> {
+    try {
+      const response = await fetch(
+        `${this.ordersServiceUrl}/orders/${orderId}`
+      );
+
+      if (response.status === 404) {
+        throw new NotFoundException(`Order with id '${orderId}' was not found`);
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          `Orders service returned ${response.status}: ${response.statusText}`
+        );
+      }
+
+      const orderData = await response.json();
+
+      // Map Orders service schema to API gateway schema
+      return {
+        orderId: orderData.id,
+        status: orderData.status,
+        currency: orderData.currency,
+        items:
+          orderData.items?.map((item: any) => ({
+            sku: item.productId || item.sku,
+            name: item.name,
+            unitPrice: item.unitPrice,
+            quantity: item.quantity,
+            lineTotal: item.totalPrice || item.lineTotal,
+          })) || [],
+        totals: {
+          subtotal: orderData.subtotal,
+          tax: orderData.tax,
+          grandTotal: orderData.grandTotal,
+        },
+        shippingAddress: orderData.shippingAddress
+          ? {
+              fullName: orderData.shippingAddress.fullName,
+              streetAddress:
+                orderData.shippingAddress.addressLine1 ||
+                orderData.shippingAddress.streetAddress,
+              city: orderData.shippingAddress.city,
+              stateProvince:
+                orderData.shippingAddress.state ||
+                orderData.shippingAddress.stateProvince,
+              postalCode: orderData.shippingAddress.postalCode,
+              country: orderData.shippingAddress.country,
+            }
+          : ({} as any),
+        createdAt: orderData.createdAt,
+        updatedAt: orderData.updatedAt,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      console.error("Error fetching order from Orders service:", error);
+      throw new Error(
+        "Unable to fetch order. The Orders service may be unavailable."
+      );
     }
-
-    return {
-      orderId: order.id,
-      status: order.status,
-      currency: order.currency,
-      items: order.items.map((item) => ({
-        sku: item.sku,
-        name: item.name,
-        unitPrice: item.unitPrice,
-        quantity: item.quantity,
-        lineTotal: item.lineTotal,
-      })),
-      totals: {
-        subtotal: order.subtotal,
-        tax: order.tax,
-        grandTotal: order.grandTotal,
-      },
-      shippingAddress: {
-        fullName: order.shippingAddress.fullName,
-        streetAddress: order.shippingAddress.streetAddress,
-        city: order.shippingAddress.city,
-        stateProvince: order.shippingAddress.stateProvince,
-        postalCode: order.shippingAddress.postalCode,
-        country: order.shippingAddress.country,
-      },
-      createdAt: order.createdAt.toISOString(),
-      updatedAt: order.updatedAt.toISOString(),
-    };
   }
 }

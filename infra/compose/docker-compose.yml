@@ -1,4 +1,9 @@
 services:
+  # ============================================
+  # DATABASES - Each microservice has its own DB
+  # ============================================
+
+  # API Gateway database (checkout flow, idempotency)
   postgres:
     image: postgres:16-alpine
     container_name: pdq-postgres
@@ -10,6 +15,42 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Payment service database
+  payment-postgres:
+    image: postgres:16-alpine
+    container_name: pdq-payment-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pdq_payment
+    ports:
+      - "5434:5432"
+    volumes:
+      - payment_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Orders service database
+  orders-postgres:
+    image: postgres:16-alpine
+    container_name: pdq-orders-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pdq_orders
+    ports:
+      - "5435:5432"
+    volumes:
+      - orders_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -58,4 +99,6 @@ services:
 
 volumes:
   postgres_data:
+  payment_postgres_data:
+  orders_postgres_data:
   redpanda_data:

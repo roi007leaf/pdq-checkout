@@ -1,0 +1,13 @@
+import { NestFactory } from "@nestjs/core";
+import { AppModule } from "./app.module";
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  const port = process.env.PAYMENT_PORT || 3002;
+  await app.listen(port);
+
+  console.log(`🏦 Payment service running on port ${port}`);
+}
+
+bootstrap();

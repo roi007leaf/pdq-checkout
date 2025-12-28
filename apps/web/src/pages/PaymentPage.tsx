@@ -1,10 +1,16 @@
-import { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { checkoutApi, cartApi, PaymentDetails } from '../api/checkout';
-import { useCheckout } from '../context/CheckoutContext';
+import { useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { cartApi, checkoutApi, PaymentDetails } from '../api/checkout';
+import { generateIdempotencyKey } from '../api/client';
 import { CheckoutSteps } from '../components/CheckoutSteps';
-import { ApiException, generateIdempotencyKey } from '../api/client';
+import { Alert, AlertDescription } from '../components/ui/alert';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { useCheckout } from '../context/CheckoutContext';
+import { parseApiFieldErrors } from '../utils/apiErrors';
 import { formatCurrency } from '../utils/format';
 
 interface FormErrors {
@@ -31,34 +37,56 @@ export function PaymentPage() {
   });
 
   const [errors, setErrors] = useState<FormErrors>({});
+  const [generalError, setGeneralError] = useState<string | null>(null);
+
+  const paymentFieldMap: Record<string, string> = {
+    cardnumber: 'cardNumber',
+    number: 'cardNumber',
+    expirydate: 'expiryDate',
+    expirationdate: 'expiryDate',
+    exp: 'expiryDate',
+    cvv: 'cvv',
+    cvc: 'cvv',
+    cardholdername: 'cardholderName',
+    name: 'cardholderName',
+  };
 
   const mutation = useMutation({
     mutationFn: () => {
       if (!shippingAddress) {
         throw new Error('Shipping address is required');
       }
+      
+      // Sanitize payment details before sending to API
+      const sanitizedPaymentDetails: PaymentDetails = {
+        cardNumber: formData.cardNumber.replace(/\s/g, ''), // Remove spaces
+        expiryDate: formData.expiryDate,
+        cvv: formData.cvv,
+        cardholderName: formData.cardholderName,
+      };
+      
       return checkoutApi.processPayment(
         {
           shippingAddress,
-          paymentDetails: formData,
+          paymentDetails: sanitizedPaymentDetails,
         },
         idempotencyKeyRef.current,
       );
     },
     onSuccess: (data) => {
       clearCheckout();
+      setGeneralError(null);
       navigate(`/confirmation/${data.orderId}`);
     },
     onError: (error) => {
-      if (error instanceof ApiException && error.error.errors) {
-        const newErrors: FormErrors = {};
-        error.error.errors.forEach((e) => {
-          // Extract field name from nested path like "paymentDetails.cardNumber"
-          const fieldName = e.field.split('.').pop() || e.field;
-          newErrors[fieldName] = e.message;
-        });
-        setErrors(newErrors);
-      }
+      const parsed = parseApiFieldErrors(error, {
+        fieldMap: paymentFieldMap,
+        preferLastPathSegment: true,
+        generalMessage: 'Please correct the highlighted payment fields and try again.',
+      });
+      setErrors(parsed.formErrors);
+      setGeneralError(parsed.unmapped.length > 0 ? parsed.generalMessage || null : null);
+
       // Generate new idempotency key for retry after failure
       idempotencyKeyRef.current = generateIdempotencyKey();
     },
@@ -73,10 +101,13 @@ export function PaymentPage() {
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
 
-    if (!formData.cardNumber.trim()) {
+    const cardNumberClean = formData.cardNumber.replace(/\s/g, '');
+    if (!cardNumberClean.trim()) {
       newErrors.cardNumber = 'Card number is required';
-    } else if (!/^\d{13,19}$/.test(formData.cardNumber.replace(/\s/g, ''))) {
-      newErrors.cardNumber = 'Invalid card number';
+    } else if (!/^\d+$/.test(cardNumberClean)) {
+      newErrors.cardNumber = 'Card number must contain only digits';
+    } else if (cardNumberClean.length < 15 || cardNumberClean.length > 16) {
+      newErrors.cardNumber = 'Card number must be 15-16 digits';
     }
 
     if (!formData.expiryDate.trim()) {
@@ -102,6 +133,7 @@ export function PaymentPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (validateForm()) {
+      setGeneralError(null);
       mutation.mutate();
     }
   };
@@ -109,7 +141,32 @@ export function PaymentPage() {
   const handleChange = (field: keyof PaymentDetails) => (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
-    setFormData((prev) => ({ ...prev, [field]: e.target.value }));
+    let value = e.target.value;
+
+    // Format card number with spaces every 4 digits
+    if (field === 'cardNumber') {
+      // Remove all non-digits
+      value = value.replace(/\D/g, '');
+      // Limit to 16 digits
+      value = value.substring(0, 16);
+      // Add space every 4 digits
+      value = value.replace(/(\d{4})(?=\d)/g, '$1 ');
+    }
+
+    // Format expiry date with slash
+    if (field === 'expiryDate') {
+      value = value.replace(/\D/g, '');
+      if (value.length >= 2) {
+        value = value.substring(0, 2) + '/' + value.substring(2, 4);
+      }
+    }
+
+    // Format CVV - digits only
+    if (field === 'cvv') {
+      value = value.replace(/\D/g, '').substring(0, 4);
+    }
+
+    setFormData((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) {
       setErrors((prev) => {
         const next = { ...prev };
@@ -120,26 +177,38 @@ export function PaymentPage() {
   };
 
   return (
-    <div>
+    <div className="container mx-auto px-4 py-10 max-w-4xl space-y-6">
       <CheckoutSteps current="payment" />
 
-      <form onSubmit={handleSubmit}>
+      {generalError && (
+        <Alert variant="destructive">
+          <AlertDescription>{generalError}</AlertDescription>
+        </Alert>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-6">
         {/* Order Summary */}
         {cart && (
-          <div className="card">
-            <h2 className="card-title">Order Summary</h2>
-            <div className="summary-row summary-total">
-              <span>Total to Pay</span>
-              <span>{formatCurrency(cart.grandTotal, cart.currency)}</span>
-            </div>
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Order Summary</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex justify-between text-2xl font-bold">
+                <span>Total to Pay</span>
+                <span className="text-primary">{formatCurrency(cart.grandTotal, cart.currency)}</span>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* Shipping Address Summary */}
-        <div className="card">
-          <h2 className="card-title">Shipping To</h2>
-          <p style={{ margin: 0 }}>
-            <strong>{shippingAddress.fullName}</strong>
+        <Card>
+          <CardHeader>
+            <CardTitle>Shipping To</CardTitle>
+          </CardHeader>
+          <CardContent className="leading-relaxed">
+            <strong className="text-base">{shippingAddress.fullName}</strong>
             <br />
             {shippingAddress.streetAddress}
             <br />
@@ -147,127 +216,117 @@ export function PaymentPage() {
             {shippingAddress.postalCode}
             <br />
             {shippingAddress.country}
-          </p>
-        </div>
+          </CardContent>
+        </Card>
 
         {/* Payment Form */}
-        <div className="card">
-          <h2 className="card-title">Payment Details</h2>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="cardNumber">
-              Card Number
-            </label>
-            <input
-              id="cardNumber"
-              type="text"
-              className={`form-input ${errors.cardNumber ? 'error' : ''}`}
-              value={formData.cardNumber}
-              onChange={handleChange('cardNumber')}
-              placeholder="4242424242424242"
-              maxLength={19}
-            />
-            {errors.cardNumber && (
-              <div className="form-error">{errors.cardNumber}</div>
-            )}
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="cardholderName">
-              Cardholder Name
-            </label>
-            <input
-              id="cardholderName"
-              type="text"
-              className={`form-input ${errors.cardholderName ? 'error' : ''}`}
-              value={formData.cardholderName}
-              onChange={handleChange('cardholderName')}
-              placeholder="John Doe"
-            />
-            {errors.cardholderName && (
-              <div className="form-error">{errors.cardholderName}</div>
-            )}
-          </div>
-
-          <div className="form-row">
-            <div className="form-group">
-              <label className="form-label" htmlFor="expiryDate">
-                Expiry Date
-              </label>
-              <input
-                id="expiryDate"
+        <Card>
+          <CardHeader>
+            <CardTitle>Payment Details</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="cardNumber">Card Number</Label>
+              <Input
+                id="cardNumber"
                 type="text"
-                className={`form-input ${errors.expiryDate ? 'error' : ''}`}
-                value={formData.expiryDate}
-                onChange={handleChange('expiryDate')}
-                placeholder="MM/YY"
-                maxLength={5}
+                inputMode="numeric"
+                className={errors.cardNumber ? 'border-destructive' : ''}
+                value={formData.cardNumber}
+                onChange={handleChange('cardNumber')}
+                placeholder="4242 4242 4242 4242"
+                maxLength={19}
               />
-              {errors.expiryDate && (
-                <div className="form-error">{errors.expiryDate}</div>
-              )}
+              {errors.cardNumber && <p className="text-sm text-destructive">{errors.cardNumber}</p>}
             </div>
 
-            <div className="form-group">
-              <label className="form-label" htmlFor="cvv">
-                CVV
-              </label>
-              <input
-                id="cvv"
+            <div className="space-y-2">
+              <Label htmlFor="cardholderName">Cardholder Name</Label>
+              <Input
+                id="cardholderName"
                 type="text"
-                className={`form-input ${errors.cvv ? 'error' : ''}`}
-                value={formData.cvv}
-                onChange={handleChange('cvv')}
-                placeholder="123"
-                maxLength={4}
+                className={errors.cardholderName ? 'border-destructive' : ''}
+                value={formData.cardholderName}
+                onChange={handleChange('cardholderName')}
+                placeholder="John Doe"
               />
-              {errors.cvv && <div className="form-error">{errors.cvv}</div>}
+              {errors.cardholderName && <p className="text-sm text-destructive">{errors.cardholderName}</p>}
             </div>
-          </div>
-        </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="expiryDate">Expiry Date</Label>
+                <Input
+                  id="expiryDate"
+                  type="text"
+                  inputMode="numeric"
+                  className={errors.expiryDate ? 'border-destructive' : ''}
+                  value={formData.expiryDate}
+                  onChange={handleChange('expiryDate')}
+                  placeholder="MM/YY"
+                  maxLength={5}
+                />
+                {errors.expiryDate && <p className="text-sm text-destructive">{errors.expiryDate}</p>}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="cvv">CVV</Label>
+                <Input
+                  id="cvv"
+                  type="text"
+                  inputMode="numeric"
+                  className={errors.cvv ? 'border-destructive' : ''}
+                  value={formData.cvv}
+                  onChange={handleChange('cvv')}
+                  placeholder="123"
+                  maxLength={4}
+                />
+                {errors.cvv && <p className="text-sm text-destructive">{errors.cvv}</p>}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Test Card Info */}
-        <div className="card" style={{ background: '#fef3c7', border: '1px solid #f59e0b' }}>
-          <p style={{ margin: 0, fontSize: '0.875rem' }}>
-            <strong>Test Cards:</strong><br />
-            ✅ Any card number = Success<br />
-            ❌ Ending in 0000 = Declined (insufficient funds)<br />
-            ❌ Ending in 1111 = Declined (invalid card)<br />
-            ❌ Ending in 9999 = Gateway error
-          </p>
-        </div>
+        <Card className="bg-amber-50 border-amber-300">
+          <CardContent className="pt-6">
+            <p className="text-sm space-y-1">
+              <strong>Test Cards:</strong><br />
+              ✅ Any card number = Success<br />
+              ❌ Ending in 0000 = Declined (insufficient funds)<br />
+              ❌ Ending in 1111 = Declined (invalid card)<br />
+              ❌ Ending in 9999 = Gateway error
+            </p>
+          </CardContent>
+        </Card>
 
-        {mutation.error && !(mutation.error instanceof ApiException && mutation.error.error.errors) && (
-          <div className="alert alert-error">
-            {mutation.error instanceof ApiException
-              ? mutation.error.error.detail || mutation.error.error.title
-              : 'An error occurred. Please try again.'}
-          </div>
+        {(generalError || mutation.error) && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              {generalError
+                ? generalError
+                : 'An error occurred while processing your payment. Please try again.'}
+            </AlertDescription>
+          </Alert>
         )}
 
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <button
+        <div className="flex gap-4">
+          <Button
             type="button"
-            className="btn btn-secondary"
+            variant="outline"
             onClick={() => navigate('/shipping')}
           >
             Back
-          </button>
-          <button
+          </Button>
+          <Button
             type="submit"
-            className="btn btn-primary"
-            style={{ flex: 1 }}
+            className="flex-1"
             disabled={mutation.isPending}
           >
-            {mutation.isPending ? (
-              <>
-                <span className="spinner" />
-                Processing Payment...
-              </>
-            ) : (
-              `Pay ${cart ? formatCurrency(cart.grandTotal, cart.currency) : ''}`
-            )}
-          </button>
+            {mutation.isPending
+              ? 'Processing Payment...'
+              : `Pay ${cart ? formatCurrency(cart.grandTotal, cart.currency) : ''}`}
+          </Button>
         </div>
       </form>
     </div>

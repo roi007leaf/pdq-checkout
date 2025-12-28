@@ -2,19 +2,24 @@
   "name": "pdq-checkout",
   "version": "1.0.0",
   "private": true,
-  "description": "E-commerce checkout flow with NestJS + React",
+  "description": "E-commerce checkout flow with NestJS + React (Microservices Architecture)",
   "scripts": {
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:all": "concurrently \"npm run dev:api\" \"npm run dev:orders\" \"npm run dev:payment\" \"npm run dev:web\"",
     "dev:api": "cd apps/api && npm run start:dev",
+    "dev:orders": "cd apps/orders && npm run start:dev",
+    "dev:payment": "cd apps/payment && npm run start:dev",
     "dev:web": "cd apps/web && npm run dev",
-    "build": "npm run build:api && npm run build:web",
+    "build": "npm run build:api && npm run build:orders && npm run build:payment && npm run build:web",
     "build:api": "cd apps/api && npm run build",
+    "build:orders": "cd apps/orders && npm run build",
+    "build:payment": "cd apps/payment && npm run build",
     "build:web": "cd apps/web && npm run build",
     "docker:up": "docker-compose -f infra/compose/docker-compose.yml up -d",
     "docker:down": "docker-compose -f infra/compose/docker-compose.yml down",
     "docker:logs": "docker-compose -f infra/compose/docker-compose.yml logs -f",
     "db:migrate": "cd apps/api && npm run migration:run",
-    "install:all": "npm install && cd apps/api && npm install && cd ../web && npm install"
+    "install:all": "npm install && cd apps/api && npm install && cd ../orders && npm install && cd ../payment && npm install && cd ../web && npm install"
   },
   "devDependencies": {
     "@types/node": "^25.0.3",

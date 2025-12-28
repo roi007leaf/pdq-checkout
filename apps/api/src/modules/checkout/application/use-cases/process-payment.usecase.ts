@@ -1,15 +1,11 @@
-import { Injectable, Inject } from '@nestjs/common';
-import { DataSource } from 'typeorm';
-import { ProcessPaymentDto } from '../dtos/process-payment.dto';
-import { CartService } from '../../../cart/cart.service';
-import { OrderRepository } from '../../../orders/infrastructure/repositories/order.repository';
-import { OutboxService } from '../../../outbox/outbox.service';
-import { PaymentGateway, PaymentResult } from '../../infrastructure/gateways/payment-gateway.interface';
-import { OrderEntity, OrderStatus } from '../../../orders/infrastructure/entities/order.entity';
-import { OrderItemEntity } from '../../../orders/infrastructure/entities/order-item.entity';
-import { ShippingAddressEntity } from '../../../orders/infrastructure/entities/shipping-address.entity';
-import { PaymentFailedException } from '../../../../common/exceptions/domain.exceptions';
-import { v4 as uuidv4 } from 'uuid';
+import { Inject, Injectable } from "@nestjs/common";
+import { UseCase } from "../../../../common/application/use-case.base";
+import { PaymentFailedException } from "../../../../common/exceptions/domain.exceptions";
+import { CartService } from "../../../cart/cart.service";
+import { OrderStatus } from "../../../orders/infrastructure/entities/order.entity";
+import { PaymentGateway } from "../../infrastructure/gateways/payment-gateway.interface";
+import { ProcessPaymentDto } from "../dtos/process-payment.dto";
+import { OrderService } from "../services/order.service";
 
 export interface PaymentResponse {
   orderId: string;
@@ -18,23 +14,33 @@ export interface PaymentResponse {
   currency: string;
   createdAt: Date;
   replayed?: boolean;
-  [key: string]: unknown;
+}
+
+interface ProcessPaymentContext {
+  correlationId: string;
 }
 
 @Injectable()
-export class ProcessPaymentUseCase {
+export class ProcessPaymentUseCase extends UseCase<
+  ProcessPaymentDto,
+  PaymentResponse
+> {
   constructor(
     private readonly cartService: CartService,
-    private readonly orderRepository: OrderRepository,
-    private readonly outboxService: OutboxService,
-    private readonly dataSource: DataSource,
-    @Inject('PaymentGateway') private readonly paymentGateway: PaymentGateway,
-  ) {}
+    private readonly orderService: OrderService,
+    @Inject("PaymentGateway") private readonly paymentGateway: PaymentGateway
+  ) {
+    super(ProcessPaymentUseCase.name);
+  }
 
-  async execute(dto: ProcessPaymentDto, correlationId: string): Promise<PaymentResponse> {
+  protected async executeImpl(
+    dto: ProcessPaymentDto,
+    context?: ProcessPaymentContext
+  ): Promise<PaymentResponse> {
     const cart = this.cartService.getCart();
-    
-    // Process payment through gateway
+    const correlationId = context?.correlationId || "N/A";
+
+    // Step 1: Process payment through payment gateway service
     const paymentResult = await this.paymentGateway.processPayment({
       amount: cart.grandTotal,
       currency: cart.currency,
@@ -45,11 +51,24 @@ export class ProcessPaymentUseCase {
     });
 
     if (!paymentResult.success) {
-      throw new PaymentFailedException(paymentResult.error || 'Payment was declined');
+      throw new PaymentFailedException(
+        paymentResult.error || "Payment was declined"
+      );
     }
 
-    // Create order in a transaction with outbox event
-    const order = await this.createOrderWithOutbox(dto, cart, paymentResult, correlationId);
+    // Step 2: Create order through order service
+    const order = await this.orderService.createOrderWithOutbox({
+      dto,
+      cartData: {
+        items: cart.items,
+        subtotal: cart.subtotal,
+        tax: cart.tax,
+        grandTotal: cart.grandTotal,
+        currency: cart.currency,
+      },
+      paymentResult,
+      correlationId,
+    });
 
     return {
       orderId: order.id,
@@ -58,90 +77,5 @@ export class ProcessPaymentUseCase {
       currency: order.currency,
       createdAt: order.createdAt,
     };
-  }
-
-  private async createOrderWithOutbox(
-    dto: ProcessPaymentDto,
-    cart: ReturnType<CartService['getCart']>,
-    paymentResult: PaymentResult,
-    correlationId: string,
-  ): Promise<OrderEntity> {
-    return this.dataSource.transaction(async (manager) => {
-      const orderId = uuidv4();
-
-      // Create order entity
-      const order = manager.create(OrderEntity, {
-        id: orderId,
-        status: OrderStatus.CONFIRMED,
-        currency: cart.currency,
-        subtotal: cart.subtotal,
-        tax: cart.tax,
-        grandTotal: cart.grandTotal,
-        metadata: {
-          paymentTransactionId: paymentResult.transactionId,
-          source: dto.metadata || 'web',
-        },
-      });
-
-      // Create order items
-      order.items = cart.items.map((item) =>
-        manager.create(OrderItemEntity, {
-          orderId,
-          sku: item.sku,
-          name: item.name,
-          unitPrice: item.unitPrice,
-          quantity: item.quantity,
-          lineTotal: item.lineTotal,
-        }),
-      );
-
-      // Create shipping address
-      order.shippingAddress = manager.create(ShippingAddressEntity, {
-        orderId,
-        fullName: dto.shippingAddress.fullName,
-        streetAddress: dto.shippingAddress.streetAddress,
-        city: dto.shippingAddress.city,
-        stateProvince: dto.shippingAddress.stateProvince,
-        postalCode: dto.shippingAddress.postalCode,
-        country: dto.shippingAddress.country,
-      });
-
-      // Save order (cascades to items and address)
-      const savedOrder = await manager.save(order);
-
-      // Create outbox event in same transaction
-      await this.outboxService.createEvent(
-        manager,
-        'order',
-        savedOrder.id,
-        'OrderCreated',
-        {
-          orderId: savedOrder.id,
-          status: savedOrder.status,
-          currency: savedOrder.currency,
-          totals: {
-            subtotal: savedOrder.subtotal,
-            tax: savedOrder.tax,
-            grandTotal: savedOrder.grandTotal,
-          },
-          items: savedOrder.items.map((item) => ({
-            sku: item.sku,
-            name: item.name,
-            unitPrice: item.unitPrice,
-            quantity: item.quantity,
-            lineTotal: item.lineTotal,
-          })),
-          shippingAddress: {
-            fullName: savedOrder.shippingAddress.fullName,
-            city: savedOrder.shippingAddress.city,
-            country: savedOrder.shippingAddress.country,
-          },
-          createdAt: savedOrder.createdAt.toISOString(),
-        },
-        { correlationId },
-      );
-
-      return savedOrder;
-    });
   }
 }

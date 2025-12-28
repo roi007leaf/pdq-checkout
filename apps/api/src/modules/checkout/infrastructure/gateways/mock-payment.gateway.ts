@@ -1,10 +1,10 @@
-import { Injectable } from '@nestjs/common';
-import { v4 as uuidv4 } from 'uuid';
+import { Injectable } from "@nestjs/common";
+import { v4 as uuidv4 } from "uuid";
 import {
   PaymentGateway,
   PaymentRequest,
   PaymentResult,
-} from './payment-gateway.interface';
+} from "./payment-gateway.interface";
 
 @Injectable()
 export class MockPaymentGateway implements PaymentGateway {
@@ -18,34 +18,40 @@ export class MockPaymentGateway implements PaymentGateway {
     // Everything else = success
     const lastFour = request.cardNumber.slice(-4);
 
-    if (lastFour === '0000') {
+    console.log("[MockPaymentGateway] Processing payment:", {
+      cardNumber: request.cardNumber,
+      lastFour,
+      amount: request.amount,
+    });
+
+    if (lastFour === "0000") {
       return {
         success: false,
-        error: 'Card declined: Insufficient funds',
-        errorCode: 'INSUFFICIENT_FUNDS',
+        error: "Card declined: Insufficient funds",
+        errorCode: "INSUFFICIENT_FUNDS",
       };
     }
 
-    if (lastFour === '9999') {
+    if (lastFour === "9999") {
       return {
         success: false,
-        error: 'Payment gateway temporarily unavailable',
-        errorCode: 'GATEWAY_ERROR',
+        error: "Payment gateway temporarily unavailable",
+        errorCode: "GATEWAY_ERROR",
       };
     }
 
-    if (lastFour === '1111') {
+    if (lastFour === "1111") {
       return {
         success: false,
-        error: 'Card declined: Invalid card number',
-        errorCode: 'INVALID_CARD',
+        error: "Card declined: Invalid card number",
+        errorCode: "INVALID_CARD",
       };
     }
 
     // Success case
     return {
       success: true,
-      transactionId: `txn_${uuidv4().replace(/-/g, '').substring(0, 16)}`,
+      transactionId: `txn_${uuidv4().replace(/-/g, "").substring(0, 16)}`,
     };
   }
 

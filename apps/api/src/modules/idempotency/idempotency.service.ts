@@ -1,12 +1,12 @@
-import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import * as crypto from 'crypto';
+import { Injectable } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import * as crypto from "crypto";
+import { Repository } from "typeorm";
+import { IdempotencyConflictException } from "../../common/exceptions/domain.exceptions";
 import {
   IdempotencyKeyEntity,
   IdempotencyStatus,
-} from './infrastructure/entities/idempotency-key.entity';
-import { IdempotencyConflictException } from '../../common/exceptions/domain.exceptions';
+} from "./infrastructure/entities/idempotency-key.entity";
 
 export interface IdempotencyCheckResult {
   status: IdempotencyStatus;
@@ -20,13 +20,13 @@ const IDEMPOTENCY_TTL_HOURS = 24;
 export class IdempotencyService {
   constructor(
     @InjectRepository(IdempotencyKeyEntity)
-    private readonly idempotencyRepository: Repository<IdempotencyKeyEntity>,
+    private readonly idempotencyRepository: Repository<IdempotencyKeyEntity>
   ) {}
 
   async checkOrCreate(
     key: string,
     scope: string,
-    payload: unknown,
+    payload: unknown
   ): Promise<IdempotencyCheckResult> {
     const requestHash = this.hashPayload(payload);
     const expiresAt = new Date();
@@ -89,10 +89,7 @@ export class IdempotencyService {
       };
     } catch (error: unknown) {
       // Handle race condition - another request created the record
-      if (
-        error instanceof Error &&
-        error.message.includes('duplicate key')
-      ) {
+      if (error instanceof Error && error.message.includes("duplicate key")) {
         return this.checkOrCreate(key, scope, payload);
       }
       throw error;
@@ -103,9 +100,11 @@ export class IdempotencyService {
     key: string,
     scope: string,
     responseCode: number,
-    responseBody: unknown,
+    responseBody: unknown
   ): Promise<void> {
-    const record = await this.idempotencyRepository.findOne({ where: { key, scope } });
+    const record = await this.idempotencyRepository.findOne({
+      where: { key, scope },
+    });
     if (record) {
       record.status = IdempotencyStatus.COMPLETED;
       record.responseCode = responseCode;
@@ -116,7 +115,9 @@ export class IdempotencyService {
   }
 
   async markFailed(key: string, scope: string): Promise<void> {
-    const record = await this.idempotencyRepository.findOne({ where: { key, scope } });
+    const record = await this.idempotencyRepository.findOne({
+      where: { key, scope },
+    });
     if (record) {
       record.status = IdempotencyStatus.FAILED;
       record.lockedAt = null;
@@ -125,7 +126,10 @@ export class IdempotencyService {
   }
 
   private hashPayload(payload: unknown): string {
-    const normalized = JSON.stringify(payload, Object.keys(payload as object).sort());
-    return crypto.createHash('sha256').update(normalized).digest('hex');
+    const normalized = JSON.stringify(
+      payload,
+      Object.keys(payload as object).sort()
+    );
+    return crypto.createHash("sha256").update(normalized).digest("hex");
   }
 }
