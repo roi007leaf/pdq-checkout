@@ -7,7 +7,7 @@ A complete e-commerce checkout flow implementation with NestJS backend and React
 - **Cart Display**: View cart contents with product details, quantities, and prices
 - **Shipping Form**: Validated address collection with inline error feedback
 - **Payment Processing**: Mock payment gateway with simulated success/failure scenarios
-- **Order Confirmation**: Unique order ID with full order details
+- **Order status page**: Shows processing state, confirmed orders, and payment failures (with reason + retry)
 - **Idempotency**: Prevents duplicate orders on payment retries
 - **Microservices Architecture**: 3 services (API Gateway, Orders, Payment) with DB-per-service
 - **Event-Driven**: Kafka/Redpanda for inter-service communication
@@ -54,7 +54,7 @@ Each service:
 
 ## Project Structure
 
-```
+```text
 PDQ/
 ├── apps/
 │   ├── api/                    # NestJS API Gateway
@@ -213,6 +213,19 @@ To observe completion in the UI, the client polls:
 
 - `GET /api/orders/:id` (API gateway proxies/queries the Orders service)
 
+### UI behavior (async confirmation)
+
+Because payment is async, the UI **cannot** treat a successful `POST /api/checkout/payment` as “order confirmed”.
+Instead the web app navigates to `/confirmation/:orderId` and:
+
+- Polls `GET /api/orders/:id` until the order reaches a terminal state.
+- Shows one of these states:
+  - `PENDING_PAYMENT` / `PROCESSING` → **Processing Payment…**
+  - `CONFIRMED` → **Order Confirmed** (and only then the checkout state is cleared)
+  - `PAYMENT_FAILED` → **Payment Failed** + error message + “Try Another Card”
+
+Note: right after kickoff, the order may not exist yet in the Orders service; a brief **404** can be normal while the async flow catches up.
+
 Code pointers (current implementation):
 
 - API kickoff: `apps/api/src/modules/checkout/checkout.controller.ts` and `apps/api/src/modules/checkout/application/use-cases/async-checkout.usecase.ts`
@@ -238,13 +251,15 @@ The mock payment gateway simulates different scenarios based on card number:
 
 Example test card: `4242424242424242`
 
+When a payment fails, the Orders service stores error details and the UI displays them.
+
 ## Architecture Decisions
 
 ### Use-Case Architecture (Clean Architecture)
 
 The backend follows a use-case based organization within each module:
 
-```
+```text
 module/
 ├── application/
 │   ├── use-cases/     # Business logic orchestration

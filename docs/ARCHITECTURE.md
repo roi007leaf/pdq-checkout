@@ -6,7 +6,7 @@ PDQ implements a true microservices architecture with dedicated databases per se
 
 ## Architecture Diagram
 
-```
+```text
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │   Web Client    │     │  Redpanda UI    │     │  PostgreSQL x3  │
 │   (React)       │     │  :8080          │     │  (per service)  │
@@ -48,7 +48,7 @@ PDQ implements a true microservices architecture with dedicated databases per se
 
 ### Happy Path (Successful Checkout)
 
-```
+```text
 1. Client → POST /api/checkout/payment
 2. API Gateway → Kafka: CheckoutRequested
 3. API Gateway → Client: { orderId, status: "PENDING_PAYMENT" }
@@ -62,11 +62,33 @@ PDQ implements a true microservices architecture with dedicated databases per se
 11. Orders Service → Update order (status: CONFIRMED)
 12. Orders Service → Kafka: OrderConfirmed
 13. Client → GET /api/orders/:id → Order details
+
+### Client UX (status polling)
+
+The web app navigates to the confirmation route immediately after kickoff:
+
+- `POST /api/checkout/payment` → returns `{ orderId, status: "PENDING_PAYMENT" }`
+- UI then polls `GET /api/orders/:id` until terminal status.
+
+Recommended mapping:
+
+- `PENDING_PAYMENT` / `PROCESSING` → show “Processing Payment…”
+- `CONFIRMED` → show success screen
+- `PAYMENT_FAILED` → show failure screen + allow retry
+
+Because this is event-driven, a short-lived `404` from `GET /api/orders/:id` right after kickoff can be expected.
+
+### Order status payload (payment errors)
+
+When payment fails, Orders persists the reason in order metadata and returns it to clients (via the API gateway) as:
+
+- `order.payment.error`
+- `order.payment.errorCode`
 ```
 
 ### Payment Failure Path
 
-```
+```text
 7. Payment Service ← Kafka: PaymentRequested
 8. Payment Service → Process payment (fails)
 9. Payment Service → Kafka: PaymentFailed

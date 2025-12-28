@@ -158,7 +158,7 @@ export class OrdersService {
 
     await manager.save(paymentRequestEvent);
 
-    // 6. Create outbox event for order created (for other consumers like fulfillment)
+    // 6. Create outbox event for order created
     const orderCreatedEvent = manager.create(OutboxEventEntity, {
       id: uuidv4(),
       aggregateType: "Order",

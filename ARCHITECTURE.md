@@ -29,8 +29,8 @@ PDQ is an e-commerce checkout system built with a **microservices architecture**
 - ✅ Event-driven architecture with Kafka
 - ✅ Idempotency for all operations
 - ✅ Transactional outbox pattern
-- ✅ Comprehensive payment validation
-- ✅ Real-time order status updates
+- ✅ Mock-friendly payment input validation (no Luhn; supports test cards)
+- ✅ Order status polling (pending/confirmed/failed) with failure reasons
 
 ---
 
@@ -90,7 +90,7 @@ PDQ is an e-commerce checkout system built with a **microservices architecture**
 - **Key Features**:
   - Shopping cart
   - Multi-step checkout flow
-  - Real-time order status polling
+  - Order status polling + async confirmation UX (pending/confirmed/failed)
   - Auto-formatting for card numbers
 
 **Key Files**:
@@ -104,7 +104,7 @@ PDQ is an e-commerce checkout system built with a **microservices architecture**
 
 ### Three Separate Databases
 
-```
+```text
 ┌─────────────────────┐
 │   pdq_checkout      │  Port 5432
 │   (API Service)     │
@@ -183,7 +183,7 @@ TypeOrmModule.forRootAsync({
 
 ### Complete Checkout Flow
 
-```
+```text
 ┌─────────┐       ┌─────────┐       ┌─────────┐       ┌─────────┐
 │  User   │       │   API   │       │ Orders  │       │ Payment │
 └────┬────┘       └────┬────┘       └────┬────┘       └────┬────┘
@@ -221,11 +221,11 @@ TypeOrmModule.forRootAsync({
 
 ### Kafka Topics
 
-```
+```text
 checkout.requests   → Orders creates order
 payment.requests    → Payment processes payment
 payment.events      → Orders updates status
-order.events        → Other services (fulfillment, etc.)
+order.events        → Other services
 ```
 
 ### Step-by-Step with Code
@@ -589,7 +589,7 @@ const sanitizedPaymentDetails: PaymentDetails = {
 
 ### Test Card Numbers
 
-```
+```text
 ✅ Success:
 - 4242 4242 4242 4242
 - 5555 5555 5555 4444
@@ -610,10 +610,10 @@ const sanitizedPaymentDetails: PaymentDetails = {
 1. **Submit payment** with card `5555555555551111`
 2. **Watch logs** - Payment service should show:
 
-   ```
-   [PaymentService] Processing payment: { last4: '1111', amount: 13994 }
-   ✅ Payment xxx processed for order xxx: PaymentFailed
-   ```
+```text
+ [PaymentService] Processing payment: { last4: '1111', amount: 13994 }
+ ✅ Payment xxx processed for order xxx: PaymentFailed
+```
 
 3. **Check databases**:
    - `pdq_payment.payment_transactions` → status = `FAILED`, error_message = `Invalid card`
@@ -679,7 +679,7 @@ docker ps --filter "name=redpanda"
 
 **When all services start successfully**:
 
-```
+```text
 [0] ✅ API Gateway Kafka producer connected
 [1] ✅ Orders consumer connected (topic: checkout.requests)
 [1] ✅ Orders payment consumer connected (topic: payment.events)
@@ -688,7 +688,7 @@ docker ps --filter "name=redpanda"
 
 **When processing a payment**:
 
-```
+```text
 [0] 📤 [API Gateway] Sent CheckoutRequested to checkout.requests
 [1] ✅ Order xxx created with status PENDING_PAYMENT
 [1] 📤 [Orders] Published: PaymentRequested to payment.requests
@@ -776,7 +776,7 @@ LIMIT 10;
 
 ### Code Structure
 
-```
+```text
 apps/
 ├── api/          → API Gateway (Port 3000)
 ├── orders/       → Orders Service (Port 3003)
